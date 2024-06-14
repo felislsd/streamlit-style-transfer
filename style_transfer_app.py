@@ -7,6 +7,7 @@ from tensorflow.keras.optimizers import Adam
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
+import concurrent.futures
 from PIL import Image
 import requests
 from io import BytesIO
@@ -53,11 +54,12 @@ def deprocess(x):
 def display_image(image):
     img = np.squeeze(image, axis=0)
     img = deprocess(img)
-    plt.grid(False)
-    plt.xticks([])
-    plt.yticks([])
-    plt.imshow(img)
-    st.pyplot(plt)
+    #plt.grid(False)
+    #plt.xticks([])
+    #plt.yticks([])
+    #plt.imshow(img)
+    #st.pyplot(plt)
+    st.image(img, use_column_width=True)
     
     
 # Define content and style models
@@ -98,6 +100,13 @@ def training_loop(content, style, iterations=20, alpha=10., beta=20.):
     opt = Adam(learning_rate=7.)
     best_cost = float('inf')
     best_image = None
+    generated_images = []
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    start_time = time.time()
+    
+    
     for i in range(iterations):
         with tf.GradientTape() as tape:
             J_content = content_cost(content, generated)
@@ -108,7 +117,9 @@ def training_loop(content, style, iterations=20, alpha=10., beta=20.):
         if J_total < best_cost:
             best_cost = J_total
             best_image = generated.numpy()
-        print("Cost at {}: {}. Time elapsed: {}".format(i, J_total, time.time() - start_time))
+        elapsed_time = time.time() - start_time
+        status_text.text(f"Iteration {i+1}/{iterations}, Cost: {J_total:.2f}, Time elapsed: {elapsed_time:.2f}s")
+        progress_bar.progress((i+1) / iterations)
         generated_images.append(generated.numpy())
     return best_image
 
@@ -123,23 +134,29 @@ style_img = None
 use_local_content = cols[0].checkbox("Use Local Content Image", value=False)
 use_local_style = cols[1].checkbox("Use Local Style Image", value=False)
 
+# Content Image Inputs
 if use_local_content:
     content_file = cols[0].file_uploader("Choose Content Image...", type=["jpg", "png", "jpeg"], key='content')
     if content_file:
         content_img = Image.open(content_file)
+        content_array = load_and_process_image(content_file)
 else:
     content_url = cols[0].text_input("Enter Content Image URL", "")
     if content_url:
         content_img = Image.open(BytesIO(requests.get(content_url).content))
+        content_array = load_and_process_image_url(content_url)
 
+# Style Image Inputs        
 if use_local_style:
     style_file = cols[1].file_uploader("Choose Style Image...", type=["jpg", "png", "jpeg"], key='style')
     if style_file:
         style_img = Image.open(style_file)
+        style_array = load_and_process_image(style_file)
 else:
     style_url = cols[1].text_input("Enter Style Image URL", "")
     if style_url:
         style_img = Image.open(BytesIO(requests.get(style_url).content))
+        style_array = load_and_process_image_url(style_url)
 
 iterations = st.slider("Number of iterations", min_value=10, max_value=100, value=20, step=10)
 
@@ -148,9 +165,12 @@ if content_img and style_img:
     cols[1].image(style_img, caption='Style Image', use_column_width=True)
 
     if st.button("Generate"):
-        content_array = load_and_process_image_url(content_url) if not use_local_content else load_and_process_image(content_file)
-        style_array = load_and_process_image_url(style_url) if not use_local_style else load_and_process_image(style_file)
+        with st.spinner('Processing...'):
+            best_image = training_loop(content_array, style_array, iterations=iterations)
+            st.image(best_image, caption='Stylized Image')
+        #content_array = load_and_process_image_url(content_url) if not use_local_content else load_and_process_image(content_file)
+        #style_array = load_and_process_image_url(style_url) if not use_local_style else load_and_process_image(style_file)
 
-        result_image = training_loop(content_array, style_array, iterations=iterations)
-        st.image(deprocess(result_image), caption="Generated Image")
+        #result_image = training_loop(content_array, style_array, iterations=iterations)
+        #st.image(deprocess(result_image), caption="Generated Image")
 
