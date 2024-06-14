@@ -58,3 +58,36 @@ def display_image(image):
     plt.yticks([])
     plt.imshow(img)
     st.pyplot(plt)
+    
+    
+# Define content and style models
+content_layer = 'block5_conv2'
+style_layers = ['block1_conv1', 'block3_conv1', 'block5_conv1']
+
+content_model = Model(inputs=vgg_model.input, outputs=vgg_model.get_layer(content_layer).output)
+style_models = [Model(inputs=vgg_model.input, outputs=vgg_model.get_layer(layer).output) for layer in style_layers]
+
+# Cost functions
+def content_cost(content, generated):
+    a_C = content_model(content)
+    a_G = content_model(generated)
+    return tf.reduce_mean(tf.square(a_C - a_G))
+
+def gram_matrix(A):
+    n_C = int(A.shape[-1])
+    a = tf.reshape(A, [-1, n_C])
+    n = tf.shape(a)[0]
+    G = tf.matmul(a, a, transpose_a=True)
+    return G / tf.cast(n, tf.float32)
+
+def style_cost(style, generated):
+    J_style = 0
+    lam = 1. / len(style_models)
+    for style_model in style_models:
+        a_S = style_model(style)
+        a_G = style_model(generated)
+        GS = gram_matrix(a_S)
+        GG = gram_matrix(a_G)
+        current_cost = tf.reduce_mean(tf.square(GS - GG))
+        J_style += current_cost * lam
+    return J_style
