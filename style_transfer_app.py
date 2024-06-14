@@ -91,3 +91,64 @@ def style_cost(style, generated):
         current_cost = tf.reduce_mean(tf.square(GS - GG))
         J_style += current_cost * lam
     return J_style
+
+# Training loop
+def training_loop(content, style, iterations=20, alpha=10., beta=20.):
+    generated = tf.Variable(content, dtype=tf.float32)
+    opt = Adam(learning_rate=7.)
+    best_cost = float('inf')
+    best_image = None
+    for i in range(iterations):
+        with tf.GradientTape() as tape:
+            J_content = content_cost(content, generated)
+            J_style = style_cost(style, generated)
+            J_total = alpha * J_content + beta * J_style
+        grads = tape.gradient(J_total, generated)
+        opt.apply_gradients([(grads, generated)])
+        if J_total < best_cost:
+            best_cost = J_total
+            best_image = generated.numpy()
+    return best_image
+
+
+
+# Streamlit interface
+cols = st.columns(2)
+
+content_img = None
+style_img = None
+
+use_local_content = cols[0].checkbox("Use Local Content Image", value=False)
+use_local_style = cols[1].checkbox("Use Local Style Image", value=False)
+
+if use_local_content:
+    content_file = cols[0].file_uploader("Choose Content Image...", type=["jpg", "png", "jpeg"], key='content')
+    if content_file:
+        content_img = Image.open(content_file)
+else:
+    content_url = cols[0].text_input("Enter Content Image URL", "")
+    if content_url:
+        content_img = Image.open(BytesIO(requests.get(content_url).content))
+
+if use_local_style:
+    style_file = cols[1].file_uploader("Choose Style Image...", type=["jpg", "png", "jpeg"], key='style')
+    if style_file:
+        style_img = Image.open(style_file)
+else:
+    style_url = cols[1].text_input("Enter Style Image URL", "")
+    if style_url:
+        style_img = Image.open(BytesIO(requests.get(style_url).content))
+
+iterations = st.slider("Number of iterations", min_value=10, max_value=100, value=20, step=10)
+
+if content_img and style_img:
+    cols[0].image(content_img, caption='Content Image', use_column_width=True)
+    cols[1].image(style_img, caption='Style Image', use_column_width=True)
+
+    if st.button("Generate"):
+        content_array = load_and_process_image_url(content_url) if not use_local_content else load_and_process_image(content_file)
+        style_array = load_and_process_image_url(style_url) if not use_local_style else load_and_process_image(style_file)
+
+        result_image = training_loop(content_array, style_array, iterations=iterations)
+        st.image(deprocess(result_image), caption="Generated Image")
+
