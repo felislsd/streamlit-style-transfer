@@ -104,27 +104,39 @@ def training_loop(content, style, iterations=20, alpha=10., beta=20.):
     generated = tf.Variable(content, dtype=tf.float32)
     opt = Adam(learning_rate=7.)
     best_cost = float('inf')
-    best_image = None
+    best_image = generated.numpy()
     generated_images = []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     start_time = time.time()
     
+    batch_size = 10
+    num_batches = content.shape[0] // batch_size # hpw many batches are needed to process all imgs (content and style arrays)
     
     for i in range(iterations):
-        with tf.GradientTape() as tape:
-            J_content = content_cost(content, generated)
-            J_style = style_cost(style, generated)
-            J_total = alpha * J_content + beta * J_style
-        grads = tape.gradient(J_total, generated)
-        opt.apply_gradients([(grads, generated)])
-        if J_total < best_cost:
-            best_cost = J_total
-            best_image = generated.numpy()
-        elapsed_time = time.time() - start_time
-        status_text.text(f"Iteration {i+1}/{iterations}, Cost: {J_total:.2f}, Time elapsed: {elapsed_time:.2f}s")
-        progress_bar.progress((i+1) / iterations)
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = (batch_idx + 1) * batch_size
+            content_batch = content[start_idx:end_idx]
+            style_batch = style[start_idx:end_idx]
+        
+            with tf.GradientTape() as tape:
+                J_content = content_cost(content_batch, generated)
+                J_style = style_cost(style_batch, generated)
+                J_total = alpha * J_content + beta * J_style
+            
+            grads = tape.gradient(J_total, generated)
+            opt.apply_gradients([(grads, generated)])
+            
+            # Update best_image if current J_total is better
+            if J_total < best_cost:
+                best_cost = J_total
+                best_image = generated.numpy()
+                
+            elapsed_time = time.time() - start_time
+            status_text.text(f"Iteration {i+1}/{iterations}, Cost: {J_total:.2f}, Time elapsed: {elapsed_time:.2f}s")
+            progress_bar.progress((i+1) / iterations)
         generated_images.append(generated.numpy())
     return best_image
 
@@ -172,10 +184,7 @@ if content_img and style_img:
     if st.button("Generate"):
         with st.spinner('Processing...'):
             best_image = training_loop(content_array, style_array, iterations=iterations)
+            best_image = deprocess(best_image)  # Deprocess the image
             st.image(best_image, caption='Stylized Image')
-        #content_array = load_and_process_image_url(content_url) if not use_local_content else load_and_process_image(content_file)
-        #style_array = load_and_process_image_url(style_url) if not use_local_style else load_and_process_image(style_file)
 
-        #result_image = training_loop(content_array, style_array, iterations=iterations)
-        #st.image(deprocess(result_image), caption="Generated Image")
 
