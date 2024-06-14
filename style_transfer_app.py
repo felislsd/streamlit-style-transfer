@@ -13,6 +13,11 @@ import requests
 from io import BytesIO
 import time
 
+# Adjustment to TensorFlow GPU memory alloaction (not all at once)
+config = tf.compat.v1.ConfigProto()
+config.gpu_options.allow_growth = True
+session = tf.compat.v1.Session(config=config)
+
 # Streamlit UI setup
 st.set_page_config(layout="wide")
 st.title("Neural Style Transfer")
