@@ -108,6 +108,8 @@ def training_loop(content, style, iterations=20, alpha=10., beta=20.):
         if J_total < best_cost:
             best_cost = J_total
             best_image = generated.numpy()
+        print("Cost at {}: {}. Time elapsed: {}".format(i, J_total, time.time() - start_time))
+        generated_images.append(generated.numpy())
     return best_image
 
 
