@@ -5,7 +5,6 @@ from tensorflow.keras.applications.vgg19 import preprocess_input
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 import numpy as np
-import matplotlib.pyplot as plt
 import streamlit as st
 import concurrent.futures
 from PIL import Image
@@ -14,63 +13,72 @@ from io import BytesIO
 import time
 import logging
 from tensorflow.python.client import device_lib
-#import os
 import os
 import gc
 from tensorflow.keras import backend as K
 
 
-# Set TensorFlow GPU allocator
+
+# Set TensorFlow GPU allocator for memory fragmentation
 os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
-# Clear session and collect garbage to free up memory
 def clear_memory():
+    """
+    Clears TensorFlow session and triggers garbage collection to free up memory resources.
+
+    This function is useful for releasing GPU memory after running TensorFlow models 
+    or tasks that consume large amounts of memory.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     K.clear_session()
     gc.collect()
 
-# List all devices (including GPU)
-print(device_lib.list_local_devices())
-
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Clear GPU Memory
-tf.keras.backend.clear_session()
-
-# Enable Memory Fragmentation
-#os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 
 # Adjustment to TensorFlow GPU memory alloaction (not all at once)
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 session = tf.compat.v1.Session(config=config)
 
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 # Streamlit UI setup
 st.set_page_config(layout="wide")
 st.title("Neural Style Transfer")
 
-# Load VGG19 model
+
 @st.cache_resource
 def load_vgg19_model():
+    """
+    Loads the VGG19 model pretrained on the ImageNet dataset 
+    with top fully connected layers removed (include_top=False).
+    The model's layers are set to non-trainable to use it for feature extraction
+    """
     model = VGG19(include_top=False, weights='imagenet')
     model.trainable = False
     return model
 
 vgg_model = load_vgg19_model()
 
-# Example function to monitor memory usage
-def monitor_memory_usage():
-    gpu_devices = tf.config.experimental.list_physical_devices('GPU')
-    if not gpu_devices:
-        print("no gpu device found")
-    else:
-        for gpu in gpu_devices:
-            #device_name = gpu.name.split('/')[-1].replace('_', ':')
-            details = tf.config.experimental.get_memory_info('GPU:0')
-            print(f"Memory Details: {details}")
-            
+
+# Image processing functions          
 
 def resize_image(image, target_height, target_width):
+    """
+    Resize the given image to the target height and width while maintaining aspect ratio.
+    Args:
+        image (PIL.Image): Input image to be resized.
+        target_height (int): Target height of the resized image.
+        target_width (int): Target width of the resized image.
+    Returns:
+        PIL.Image: Resized image with dimensions (target_height, target_width).
+    """
     if original_width >= original_height:
     # Landscape orientation or square image
         new_width = target_size
@@ -82,10 +90,20 @@ def resize_image(image, target_height, target_width):
     resized_image = image.resize((new_width, new_height))
     return resized_image
 
-target_size = 512
+target_size = 1024
 
-# Image processing functions
+
 def load_and_process_image(image_path, original_width, original_height ):
+    """
+    Loads an image from the given path, resizes it to match original dimensions,
+    converts it to a NumPy array, and preprocesses it for VGG19 model input.
+    Args:
+        image_path (str): File path or URL of the input image.
+        original_width (int): Original width of the image before resizing.
+        original_height (int): Original height of the image before resizing.
+    Returns:
+        numpy.ndarray: Processed image as a 4-dimensional tensor ready for VGG19 input.
+    """
     img = load_img(image_path)
     img = resize_image(img, original_width, original_height)
     img = img_to_array(img)
@@ -93,7 +111,18 @@ def load_and_process_image(image_path, original_width, original_height ):
     img = np.expand_dims(img, axis=0) #model expects 4dim tensor
     return img
 
+
 def load_and_process_image_url(image_url, original_width, original_height ):
+    """
+    Downloads an image from the given URL, resizes it to match original dimensions,
+    converts it to a NumPy array, and preprocesses it for VGG19 model input.
+    Args:
+        image_url (str): URL of the input image.
+        original_width (int): Original width of the image before resizing.
+        original_height (int): Original height of the image before resizing.
+    Returns:
+        numpy.ndarray: Processed image as a 4-dimensional tensor ready for VGG19 input.
+    """
     response = requests.get(image_url)
     img = Image.open(BytesIO(response.content))
     img = resize_image(img, original_width, original_height)
@@ -102,59 +131,121 @@ def load_and_process_image_url(image_url, original_width, original_height ):
     img = np.expand_dims(img, axis=0)
     return img
 
+
 def deprocess(x):
-    x[:, :, 0] += 103.939 # does the opposite of preprocess_input
+    """
+    Does the opposite of preprocess_input -
+    converts the processed image tensor back to a displayable image format.
+    Reverses the preprocessing steps performed for VGG19 model input.
+    Args:
+        x (numpy.ndarray): Processed image tensor.
+    Returns:
+        numpy.ndarray: Deprocessed image array ready for visualization.
+    """
+    x[:, :, 0] += 103.939 
     x[:, :, 1] += 116.779
     x[:, :, 2] += 123.68
-    x = x[:, :, ::-1]  # invert the order of the channels
+    x = x[:, :, ::-1]  
     x = np.clip(x, 0, 255).astype('uint8')
-    #x = np.flipud(x)
     return x
 
+
 def display_image(image):
+    """
+    Displays the given image in the Streamlit app interface.
+    Args:
+        image (numpy.ndarray): Image array to be displayed.
+    """
     img = np.squeeze(image, axis=0)
     img = deprocess(img)
     st.image(img, use_column_width=True)
     
     
 # Define content and style models
-content_layer = 'block5_conv2'
-#style_layers = ['block1_conv1', 'block3_conv1', 'block5_conv1']
-#style_layers = ['block1_conv2', 'block2_conv2', 'block3_conv3', 'block4_conv3', 'block5_conv2']
-style_layers = ['block1_conv1', 'block2_conv2']
 
-content_model = Model(inputs=vgg_model.input, outputs=vgg_model.get_layer(content_layer).output)
-style_models = [Model(inputs=vgg_model.input, outputs=vgg_model.get_layer(layer).output) for layer in style_layers]
+# Content layer
+content_layer = 'block5_conv2'
+
+
+# Style layers
+style_layers_list_1 = ['block1_conv1', 'block2_conv1']
+style_layers_list_2 = ['block1_conv1', 'block2_conv2']
+style_layers_list_3 = ['block1_conv1', 'block2_conv1', 'block3_conv1']
+style_layers_list_4 = ['block1_conv1', 'block2_conv2', 'block3_conv1']
+style_layers_list_5 = ['block1_conv1', 'block2_conv2', 'block3_conv3']
+style_layers_list_6 = ['block1_conv1', 'block2_conv1', 'block4_conv1']
+style_layers_list_7 = ['block1_conv1', 'block3_conv1', 'block4_conv1']
+style_layers_list_8 = ['block1_conv1', 'block3_conv2', 'block4_conv2']
+style_layers_list_9 = ['block1_conv1', 'block3_conv1', 'block5_conv1']
+style_layers_list_10 = ['block1_conv1', 'block3_conv2', 'block5_conv3']
+                      
+
+style_layers_lists = {
+    'Style 1': style_layers_list_1,
+    'Style 2': style_layers_list_2,
+    'Style 3': style_layers_list_3,
+    'Style 4': style_layers_list_4,
+    'Style 5': style_layers_list_5,
+    'Style 6': style_layers_list_6,
+    'Style 7': style_layers_list_7,
+    'Style 8': style_layers_list_8,
+    'Style 9': style_layers_list_9,
+    'Style 10': style_layers_list_10
+}
+
 
 # Cost functions
+
 def content_cost(content, generated):
+    """
+    Calculates the content cost between the processed images using the L2 norm. 
+    Args:
+        content (numpy.ndarray): The preprocessed content image represented as a 4-dimensional tensor
+        generated (tensorflow.Tensor): The generated image tensor resulting from the neural style transfer process.
+    Returns:
+        tensorflow.Tensor: Scalar value representing the content cost
+    """
     a_C = content_model(content)
     a_G = content_model(generated)
     return tf.reduce_mean(tf.square(a_C - a_G))
 
-@tf.custom_gradient
-def custom_matmul(a, b):
-    # Implement your custom MatMul operation with gradient checkpointing
-    assert a.shape[-1] == b.shape[0], f"Matmul shape mismatch: {a.shape} and {b.shape}"
-    c = tf.matmul(a, b)
-    
-    def grad(dy):
-        # Implement gradient computation
-        da = tf.matmul(dy, tf.transpose(b))
-        db = tf.matmul(tf.transpose(a), dy)
-        return da, db
-
-    return c, grad
 
 def gram_matrix(A):
+    """
+    Computes the Gram matrix of a given tensor A, which represents the correlations
+    between different channels of the feature map tensor.
+
+    Args:
+        A (tensorflow.Tensor): 4-dimensional tensor of shape (1, height, width, channels),
+                               where channels represent the number of filters in a
+                               convolutional layer.
+
+    Returns:
+        tensorflow.Tensor: Gram matrix computed from tensor A, normalized by the number
+                           of elements in the feature map.
+    """
+    # The number of channels (filters) in tensor A
     n_C = int(A.shape[-1])
+    # Reshapes tensor A to combine all spatial dimensions into a single dimension
     a = tf.reshape(A, [-1, n_C])
+    # Computes the number of elements in the reshaped tensor A
     n = tf.shape(a)[0]
+    # Compute the Gram matrix by taking the dot product of reshaped A with its transpose
     G = tf.matmul(a, a, transpose_a=True)
-    #G = custom_matmul(a, tf.transpose(a))
+    # Returns the normalized Gram matrix 
     return G / tf.cast(n, tf.float32)
 
+
 def style_cost(style, generated):
+    """
+    Calculates the style cost as the weighted sum of mean squared differences
+    between the Gram matrices of style and generated images across multiple layers.
+    Args:
+        style (numpy.ndarray): Style image.
+        generated (tensorflow.Tensor): Generated image tensor.
+    Returns:
+        tensorflow.Tensor: Style cost tensor.
+    """
     J_style = 0
     lam = 1. / len(style_models)
     for style_model in style_models:
@@ -166,8 +257,22 @@ def style_cost(style, generated):
         J_style += current_cost * lam
     return J_style
 
+
 # Training loop
+
 def training_loop(content, style, iterations=20, alpha=10., beta=20.):
+    """
+    Runs the optimization loop to generate a stylized image that minimizes
+    both content and style costs.
+    Args:
+        content (numpy.ndarray): Content image.
+        style (numpy.ndarray): Style image.
+        iterations (int): Number of optimization iterations.
+        alpha (float): Weight of content cost.
+        beta (float): Weight of style cost.
+    Returns:
+        numpy.ndarray: Best stylized image found during optimization.
+    """
     logging.info(f"Starting training loop with {iterations} iterations.")
     logging.info(f"Content shape: {content.shape}")
     logging.info(f"Style shape: {style.shape}")
@@ -183,7 +288,6 @@ def training_loop(content, style, iterations=20, alpha=10., beta=20.):
     
     
     for i in range(iterations):
-        monitor_memory_usage()
         clear_memory()
         with tf.GradientTape() as tape:
             J_content = content_cost(content, generated)
@@ -202,10 +306,7 @@ def training_loop(content, style, iterations=20, alpha=10., beta=20.):
                 best_image = generated.numpy()
                 
             elapsed_time = time.time() - start_time
-            #status_text.text(f"Iteration {i+1}/{iterations}, Cost: {J_total:.2f}, Time elapsed: {elapsed_time:.2f}s")
-            #Print(f"Iteration {i+1}/{iterations}, Cost: {J_total:.2f}, Time elapsed: {elapsed_time:.2f}s")
             progress_bar.progress((i+1) / iterations)
-            monitor_memory_usage()
         generated_images.append(generated.numpy())
         logging.info(f"Iteration {i+1}/{iterations} completed. Best cost: {best_cost:.2f}")
     logging.info(f"Training completed. Best cost: {best_cost:.2f}")
@@ -214,6 +315,7 @@ def training_loop(content, style, iterations=20, alpha=10., beta=20.):
 
 
 # Streamlit interface
+
 cols = st.columns(2)
 
 content_img = None
@@ -225,6 +327,7 @@ use_local_content = cols[0].checkbox("Use Local Content Image", value=False)
 use_local_style = cols[1].checkbox("Use Local Style Image", value=False)
 
 # Content Image Inputs
+
 if use_local_content:
     content_file = cols[0].file_uploader("Choose Content Image...", type=["jpg", "png", "jpeg"], key='content')
     if content_file:
@@ -239,7 +342,8 @@ else:
         content_array = load_and_process_image_url(content_url, original_width, original_height)
 
 
-# Style Image Inputs        
+# Style Image Inputs      
+
 if use_local_style:
     style_file = cols[1].file_uploader("Choose Style Image...", type=["jpg", "png", "jpeg"], key='style')
     if style_file:
@@ -253,7 +357,21 @@ else:
         original_width, original_height = style_img.size
         style_array = load_and_process_image_url(style_url, original_width, original_height)
 
-iterations = st.slider("Number of iterations", min_value=10, max_value=100, value=20, step=10)
+# Iterations slider
+
+iterations = st.slider("Number of iterations", min_value=10, max_value=500, value=20, step=10)
+
+# Style slider
+
+selected_style_layers_list = st.select_slider(
+    'Select Style Layers List',
+    options=list(style_layers_lists.keys()))
+
+selected_style_layers = style_layers_lists[selected_style_layers_list]
+
+content_model = Model(inputs=vgg_model.input, outputs=vgg_model.get_layer(content_layer).output)
+style_models = [Model(inputs=vgg_model.input, outputs=vgg_model.get_layer(layer).output) for layer in selected_style_layers]
+
 
 if content_img and style_img:
     cols[0].image(content_img, caption='Content Image', use_column_width=True)
@@ -263,7 +381,6 @@ if content_img and style_img:
         with st.spinner('Processing...'):
             best_image = training_loop(content_array, style_array, iterations=iterations)
             display_image(best_image)
-            #best_image = deprocess(best_image)  # Deprocess the image
-            #st.image(best_image, caption='Stylized Image')
+
 
 
