@@ -29,8 +29,8 @@ RUN pip install -r requirements.txt
 # Expose the port where Streamlit will run
 EXPOSE 8501
 
-# Copy every content from the local file to the image
-COPY . /app
+# Copy the app file to the image
+COPY style_transfer_app.py /app
 
 
 # Set the command to run Streamlit app
